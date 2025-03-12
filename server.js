@@ -116,16 +116,28 @@ app.post('/api/upload', upload.single('excelFile'), (req, res) => {
     }
 });
 
-// Helper Function to Process Excel Data
+// Helper Function to Process Excel Data with Line Break Handling
 function processExcelData(data) {
     return data.map((row, index) => {
         const btLevelRaw = String(row['B.T Level'] || '').trim();
-        // Remove "L" prefix and ensure numeric BTL
         const btLevel = btLevelRaw.replace(/^L/i, '');
+        
+        // Process question text to handle "<br>" and preserve <br> tags
+        let questionText = row.Question || '';
+        if (typeof questionText === 'string') {
+            // Replace "<br>" (with quotes) with &lt;br&gt; to display as literal text <br>
+            questionText = questionText.replace(/\"<br>\"/g, '&lt;br&gt;');
+            // Preserve existing <br> (without quotes) for line breaks
+            // Optionally, detect points and insert <br> only if no <br> exists
+            if (!questionText.includes('<br>')) {
+                questionText = questionText.replace(/(\d+\.\s|[a-z]\)\s)/g, '$1<br>');
+            }
+        }
+
         return {
             id: index + 1,
             unit: parseInt(row.Unit) || 0,
-            question: row.Question || '',
+            question: questionText, // Use processed question text
             btLevel: btLevel || '0',
             subjectCode: row['Subject Code'] || '',
             subject: row.Subject || '',
@@ -173,21 +185,45 @@ function generateQuestions(paperType) {
     let btlRequirements;
     if (maxBTL === 6) {
         btlRequirements = [
+            { level: '1', count: 1 },
             { level: '2', count: 2 },
-            { level: '3', count: 2 },
+            { level: '3', count: 1 },
             { level: '4', count: 1 },
-            { level: 'random', options: ['1', '5', '6'], count: 1 }
+            { level: 'random', options: [ '5', '6'], count: 1 }
+        ];
+    } else if (maxBTL === 5) {
+        btlRequirements = [
+            { level: '1', count: 1 },
+            { level: '2', count: 2 },
+            { level: '3', count: 1 },
+            { level: '4', count: 1 },
+            { level: 'random', options: ['3', '5'], count: 1 }
         ];
     } else if (maxBTL === 4) {
         btlRequirements = [
+            { level: '1', count: 1 },
+            { level: '2', count: 2 },
+            { level: '3', count: 1 },
+            { level: '4', count: 1 },
+            { level: 'random', options: ['3', '4'], count: 1 }
+        ];
+    } else if (maxBTL === 3 && availableBTLs.has('2') && availableBTLs.has('3')) {
+        btlRequirements = [
+            { level: '1', count: 1 },
             { level: '2', count: 2 },
             { level: '3', count: 2 },
-            { level: '4', count: 2 }
+            { level: 'random', options: ['2', '3'], count: 1 }
         ];
-    } else if (availableBTLs.size === 1) {
+    }else if (maxBTL === 2 && availableBTLs.has('2') && availableBTLs.has('1')) {
+        btlRequirements = [
+            { level: '1', count: 1 },
+            { level: '2', count: 5 }
+        ];
+    }
+    else if (availableBTLs.size === 1) {
         btlRequirements = [{ level: [...availableBTLs][0], count: 6 }];
     } else {
-        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with multiple BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 4), or Case iii (single BTL) are supported.`);
+        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 5), Case iii (max BTL = 4), Case iv (max BTL = 3 with BTL 2 & 3), or Case v (single BTL) are supported.`);
     }
     console.log('BTL Requirements:', btlRequirements);
 
@@ -231,7 +267,6 @@ function generateQuestions(paperType) {
 
         // Helper to pick a question by BTL, adjusting units
         const pickQuestion = (btl) => {
-            // Prioritize units needing more to meet minCount, but allow any allowed unit
             const allowedUnits = unitReqs.map(r => r.unit).sort((a, b) => {
                 const aDiff = unitCount[a] - unitReqs.find(r => r.unit === a).minCount;
                 const bDiff = unitCount[b] - unitReqs.find(r => r.unit === b).minCount;
@@ -259,7 +294,7 @@ function generateQuestions(paperType) {
                     unitReqs.some(u => availableByUnitAndBTL[u.unit][btl]?.length > (btlCount[btl] || 0))
                 );
                 if (randomBTLs.length === 0) {
-                    throw new Error('No questions available for BTL [L1, L5, L6] in required units');
+                    throw new Error(`No questions available for BTL [${req.options.join(', ')}] in required units`);
                 }
                 while (count > 0) {
                     const btl = randomBTLs[Math.floor(Math.random() * randomBTLs.length)];
@@ -321,9 +356,19 @@ app.post('/api/generate', (req, res) => {
         const { paperType } = req.body;
         const selectedQuestions = generateQuestions(paperType);
 
+        console.log('Generated Questions (Limited Info):');
+        selectedQuestions.forEach((q, index) => {
+            console.log(`Question ${index + 1}:`);
+            console.log(`  Question: ${q.question}`);
+            console.log(`  Unit: ${q.unit}`);
+            console.log(`  Subject: ${q.subject}`);
+            console.log(`  Year: ${q.year}`);
+            console.log('------------------------');
+        });
+
         res.json({
             questions: selectedQuestions.map(q => ({
-                question: q.question,
+                question: q.question, // Contains <br> tags after processing
                 imageUrl: q.imageUrl,
                 btLevel: q.btLevel,
                 unit: q.unit
