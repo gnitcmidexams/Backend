@@ -122,13 +122,9 @@ function processExcelData(data) {
         const btLevelRaw = String(row['B.T Level'] || '').trim();
         const btLevel = btLevelRaw.replace(/^L/i, '');
         
-        // Process question text to handle "<br>" and preserve <br> tags
         let questionText = row.Question || '';
         if (typeof questionText === 'string') {
-            // Replace "<br>" (with quotes) with &lt;br&gt; to display as literal text <br>
-            questionText = questionText.replace(/\"<br>\"/g, '&lt;br&gt;');
-            // Preserve existing <br> (without quotes) for line breaks
-            // Optionally, detect points and insert <br> only if no <br> exists
+            questionText = questionText.replace(/\"<br>\"/g, '<br>');
             if (!questionText.includes('<br>')) {
                 questionText = questionText.replace(/(\d+\.\s|[a-z]\)\s)/g, '$1<br>');
             }
@@ -137,7 +133,7 @@ function processExcelData(data) {
         return {
             id: index + 1,
             unit: parseInt(row.Unit) || 0,
-            question: questionText, // Use processed question text
+            question: questionText,
             btLevel: btLevel || '0',
             subjectCode: row['Subject Code'] || '',
             subject: row.Subject || '',
@@ -151,7 +147,7 @@ function processExcelData(data) {
     }).filter(q => q.unit >= 1 && q.unit <= 5 && q.btLevel !== '0');
 }
 
-// Function to generate questions with strict BTL enforcement
+// Function to generate questions with strict BTL enforcement and specific unit order
 function generateQuestions(paperType) {
     if (!questionBank || questionBank.length < 6) {
         throw new Error('Insufficient questions in question bank. At least 6 questions are required.');
@@ -189,7 +185,7 @@ function generateQuestions(paperType) {
             { level: '2', count: 2 },
             { level: '3', count: 1 },
             { level: '4', count: 1 },
-            { level: 'random', options: [ '5', '6'], count: 1 }
+            { level: 'random', options: ['5', '6'], count: 1 }
         ];
     } else if (maxBTL === 5) {
         btlRequirements = [
@@ -197,7 +193,7 @@ function generateQuestions(paperType) {
             { level: '2', count: 2 },
             { level: '3', count: 1 },
             { level: '4', count: 1 },
-            { level: 'random', options: ['3', '5'], count: 1 }
+            { level: 'random', options: ['5', '3'], count: 1 }
         ];
     } else if (maxBTL === 4) {
         btlRequirements = [
@@ -207,20 +203,19 @@ function generateQuestions(paperType) {
             { level: '4', count: 1 },
             { level: 'random', options: ['3', '4'], count: 1 }
         ];
-    } else if (maxBTL === 3 && availableBTLs.has('2') && availableBTLs.has('3')) {
+    } else if (maxBTL === 3) {
         btlRequirements = [
             { level: '1', count: 1 },
             { level: '2', count: 2 },
             { level: '3', count: 2 },
             { level: 'random', options: ['2', '3'], count: 1 }
         ];
-    }else if (maxBTL === 2 && availableBTLs.has('2') && availableBTLs.has('1')) {
+    } else if (maxBTL === 2 && availableBTLs.has('2') && availableBTLs.has('1')) {
         btlRequirements = [
             { level: '1', count: 1 },
             { level: '2', count: 5 }
         ];
-    }
-    else if (availableBTLs.size === 1) {
+    } else if (availableBTLs.size === 1) {
         btlRequirements = [{ level: [...availableBTLs][0], count: 6 }];
     } else {
         throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 5), Case iii (max BTL = 4), Case iv (max BTL = 3 with BTL 2 & 3), or Case v (single BTL) are supported.`);
@@ -239,9 +234,9 @@ function generateQuestions(paperType) {
             break;
         case 'mid2':
             unitRequirements = [
+                { unit: 3, minCount: 1, maxCount: 1 },
                 { unit: 4, minCount: 2, maxCount: 3 },
-                { unit: 5, minCount: 2, maxCount: 3 },
-                { unit: 3, minCount: 1, maxCount: 1 }
+                { unit: 5, minCount: 2, maxCount: 3 }
             ];
             break;
         case 'special':
@@ -258,7 +253,7 @@ function generateQuestions(paperType) {
     }
     console.log('Unit Requirements:', unitRequirements);
 
-    // Step 5: Select questions with BTL priority
+    // Step 5: Select questions with BTL priority and specific unit order
     const selectQuestions = (btlReqs, unitReqs) => {
         let selectedQuestions = [];
         let unitCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -291,7 +286,7 @@ function generateQuestions(paperType) {
             let count = req.count;
             if (req.level === 'random') {
                 const randomBTLs = req.options.filter(btl => 
-                    unitReqs.some(u => availableByUnitAndBTL[u.unit][btl]?.length > (btlCount[btl] || 0))
+                    unitReqs.some(u => (availableByUnitAndBTL[u.unit]?.[btl]?.length || 0) > (btlCount[btl] || 0))
                 );
                 if (randomBTLs.length === 0) {
                     throw new Error(`No questions available for BTL [${req.options.join(', ')}] in required units`);
@@ -308,7 +303,7 @@ function generateQuestions(paperType) {
                 }
             } else {
                 const availableCount = unitReqs.reduce((sum, u) => 
-                    sum + (availableByUnitAndBTL[u.unit][req.level]?.length || 0) - (btlCount[req.level] || 0), 0);
+                    sum + (availableByUnitAndBTL[u.unit]?.[req.level]?.length || 0) - (btlCount[req.level] || 0), 0);
                 if (availableCount < req.count) {
                     throw new Error(`Insufficient questions for BTL ${req.level} (need ${req.count}, found ${availableCount}) in required units`);
                 }
@@ -331,10 +326,84 @@ function generateQuestions(paperType) {
             }
         }
 
-        console.log('Selected Questions:', selectedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
+        // Sort questions to match desired order based on paperType
+        const sortedQuestions = [];
+        if (paperType === 'mid1') {
+            // Mid1 order: Q1-2 (Unit 1), Q3-4 (Unit 2), Q5 (Unit 3), Q6 (Unit 1 or 2)
+            const unit1Questions = selectedQuestions.filter(q => q.unit === 1);
+            const unit2Questions = selectedQuestions.filter(q => q.unit === 2);
+            const unit3Questions = selectedQuestions.filter(q => q.unit === 3);
+
+            if (unit1Questions.length < 2 || unit2Questions.length < 2 || unit3Questions.length < 1) {
+                throw new Error('Insufficient questions to meet Mid1 unit distribution');
+            }
+
+            sortedQuestions.push(unit1Questions.shift()); // Q1: Unit 1
+            sortedQuestions.push(unit1Questions.shift()); // Q2: Unit 1
+            sortedQuestions.push(unit2Questions.shift()); // Q3: Unit 2
+            sortedQuestions.push(unit2Questions.shift()); // Q4: Unit 2
+            sortedQuestions.push(unit3Questions.shift()); // Q5: Unit 3
+
+            // Q6: Unit 1 or 2
+            const remainingMid1 = [...unit1Questions, ...unit2Questions];
+            if (remainingMid1.length > 0) {
+                sortedQuestions.push(remainingMid1[Math.floor(Math.random() * remainingMid1.length)]);
+            } else {
+                throw new Error('No remaining questions for Q6 from Unit 1 or 2');
+            }
+        } else if (paperType === 'mid2') {
+            // Mid2 order: Q1 (Unit 3), Q2-3 (Unit 4), Q4-5 (Unit 5), Q6 (Unit 4 or 5)
+            const unit3Questions = selectedQuestions.filter(q => q.unit === 3);
+            const unit4Questions = selectedQuestions.filter(q => q.unit === 4);
+            const unit5Questions = selectedQuestions.filter(q => q.unit === 5);
+
+            if (unit3Questions.length < 1 || unit4Questions.length < 2 || unit5Questions.length < 2) {
+                throw new Error('Insufficient questions to meet Mid2 unit distribution');
+            }
+
+            sortedQuestions.push(unit3Questions.shift()); // Q1: Unit 3
+            sortedQuestions.push(unit4Questions.shift()); // Q2: Unit 4
+            sortedQuestions.push(unit4Questions.shift()); // Q3: Unit 4
+            sortedQuestions.push(unit5Questions.shift()); // Q4: Unit 5
+            sortedQuestions.push(unit5Questions.shift()); // Q5: Unit 5
+
+            // Q6: Unit 4 or 5
+            const remainingMid2 = [...unit4Questions, ...unit5Questions];
+            if (remainingMid2.length > 0) {
+                sortedQuestions.push(remainingMid2[Math.floor(Math.random() * remainingMid2.length)]);
+            } else {
+                throw new Error('No remaining questions for Q6 from Unit 4 or 5');
+            }
+        } else if (paperType === 'special') {
+            // Special order: One from each unit if possible, then sort as per Mid1 for simplicity
+            const unit1Questions = selectedQuestions.filter(q => q.unit === 1);
+            const unit2Questions = selectedQuestions.filter(q => q.unit === 2);
+            const unit3Questions = selectedQuestions.filter(q => q.unit === 3);
+            const unit4Questions = selectedQuestions.filter(q => q.unit === 4);
+            const unit5Questions = selectedQuestions.filter(q => q.unit === 5);
+
+            if (unit1Questions.length < 2 || unit2Questions.length < 2 || unit3Questions.length < 1) {
+                throw new Error('Insufficient questions to meet Special unit distribution');
+            }
+
+            sortedQuestions.push(unit1Questions.shift()); // Q1: Unit 1
+            sortedQuestions.push(unit1Questions.shift()); // Q2: Unit 1
+            sortedQuestions.push(unit2Questions.shift()); // Q3: Unit 2
+            sortedQuestions.push(unit2Questions.shift()); // Q4: Unit 2
+            sortedQuestions.push(unit3Questions.shift()); // Q5: Unit 3
+
+            const remainingSpecial = [...unit1Questions, ...unit2Questions, ...unit4Questions, ...unit5Questions];
+            if (remainingSpecial.length > 0) {
+                sortedQuestions.push(remainingSpecial[Math.floor(Math.random() * remainingSpecial.length)]);
+            } else {
+                throw new Error('No remaining questions for Q6 in Special');
+            }
+        }
+
+        console.log('Selected Questions:', sortedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
         console.log('Unit Count:', unitCount);
         console.log('BTL Count:', btlCount);
-        return selectedQuestions;
+        return sortedQuestions;
     };
 
     const selected = selectQuestions(btlRequirements, unitRequirements);
@@ -355,7 +424,6 @@ app.post('/api/generate', (req, res) => {
 
         const { paperType } = req.body;
         const selectedQuestions = generateQuestions(paperType);
-
         console.log('Generated Questions (Limited Info):');
         selectedQuestions.forEach((q, index) => {
             console.log(`Question ${index + 1}:`);
@@ -368,7 +436,7 @@ app.post('/api/generate', (req, res) => {
 
         res.json({
             questions: selectedQuestions.map(q => ({
-                question: q.question, // Contains <br> tags after processing
+                question: q.question,
                 imageUrl: q.imageUrl,
                 btLevel: q.btLevel,
                 unit: q.unit
